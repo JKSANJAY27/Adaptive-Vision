@@ -1,0 +1,49 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Results</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    .row { display:flex; gap:16px; align-items:center; }
+    .patch { width:160px; height:100px; border:1px solid #333; }
+  </style>
+</head>
+<body>
+  <h2>Processing Results</h2>
+
+  <div>
+    <h4>Segmented overlay</h4>
+    <img src="{{ results.overlay_b64 }}" alt="overlay" style="max-width:600px;border:1px solid #ddd">
+  </div>
+
+  <div class="row" style="margin-top:12px;">
+    <div>
+      <h4>Dominant color</h4>
+      <img src="{{ results.dominant_patch }}" class="patch">
+      <div>RGB: {{ results.dominant_rgb }}</div>
+      <div>HSV: {{ results.dominant_hsv }}</div>
+    </div>
+    <div>
+      <h4>Recommended</h4>
+      <img src="{{ results.rec_patch }}" class="patch">
+      <div>RGB: {{ results.rec_rgb }}</div>
+    </div>
+    <div>
+      <h4>Fuzzy</h4>
+      <div>{{ results.fuzzy_desc }}</div>
+      <div>Score: {{ results.fuzzy_score }}</div>
+      <h4>ML Verdict</h4>
+      <div style="font-weight:bold">{{ results.ml_pred }}</div>
+    </div>
+  </div>
+
+  <div style="margin-top:16px;">
+    <h4>Model metrics (synthetic training)</h4>
+    <div>Accuracy: {{ results.model_acc }}</div>
+    <div>Confusion Matrix: {{ results.confusion_matrix }}</div>
+  </div>
+
+  <p><a href="/">Upload another</a></p>
+</body>
+</html>

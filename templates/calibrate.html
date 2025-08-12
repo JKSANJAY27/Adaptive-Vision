@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Calibration</title>
+  <style>
+    .patch { width: 90px; height: 90px; border: 1px solid #333; cursor: pointer; display:block; }
+    .row { display:flex; gap:12px; margin-top:12px; }
+  </style>
+</head>
+<body style="font-family:Arial, sans-serif; margin:20px">
+  <h2>Calibration — Trial {{ trial_number }} of {{ total_trials }}</h2>
+  <p>Pick the patch that best matches the <b>reference</b> color.</p>
+
+  <div>
+    <div style="display:inline-block; text-align:center; margin-right:20px;">
+      <div class="patch" style="background-color: rgb({{ ref_rgb[0] }}, {{ ref_rgb[1] }}, {{ ref_rgb[2] }});"></div>
+      <div>Reference</div>
+    </div>
+
+    <div class="row">
+      {% for o in options %}
+      <form method="post" style="display:inline-block;">
+        <input type="hidden" name="ref_h" value="{{ ref_h }}">
+        <input type="hidden" name="ref_s" value="{{ ref_s }}">
+        <input type="hidden" name="sel_h" value="{{ o.h }}">
+        <input type="hidden" name="sel_s" value="{{ o.s }}">
+        <button type="submit" style="border:none; background:none; padding:0;">
+          <div class="patch" style="background-color: rgb({{ o.rgb[0] }}, {{ o.rgb[1] }}, {{ o.rgb[2] }});"></div>
+        </button>
+      </form>
+      {% endfor %}
+    </div>
+  </div>
+
+  <p style="margin-top:20px;"><a href="/">Cancel</a></p>
+</body>
+</html>
