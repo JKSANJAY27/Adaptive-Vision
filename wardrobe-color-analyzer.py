@@ -1,812 +1,591 @@
 
-"""
-FIXED Enhanced Professional Wardrobe Color Analysis System
-=========================================================
-
-Fixed version that properly displays visualizations without closing immediately.
-All matplotlib compatibility issues resolved.
-
-Patent Reference: "Wardrobe Colour Diversity and Colour Gamut Profile Based Garment 
-Match Finding Enabler for Colourblind Individuals"
-
-Version: 2.1 (FIXED Display Version)
-"""
-
 import numpy as np
-import matplotlib
-matplotlib.use('TkAgg')  # Force use TkAgg backend for better compatibility
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from matplotlib.gridspec import GridSpec
-from sklearn.cluster import KMeans, MeanShift
-from collections import defaultdict, Counter
-import colorsys
+import pandas as pd
+from PIL import Image, ImageDraw, ImageFilter, ImageEnhance
+from collections import Counter, defaultdict
 import json
 from datetime import datetime
-from PIL import Image, ImageEnhance
-from scipy.spatial.distance import euclidean
-import pandas as pd
-import seaborn as sns
+import colorsys
+import os
+from pathlib import Path
 import warnings
-import time
 warnings.filterwarnings('ignore')
 
-def convert_numpy(obj):
-    """Convert numpy types to native Python types for JSON serialization"""
-    if isinstance(obj, np.integer):
-        return int(obj)
-    elif isinstance(obj, np.floating):
-        return float(obj)
-    elif isinstance(obj, np.ndarray):
-        return obj.tolist()
-    elif isinstance(obj, dict):
-        return {k: convert_numpy(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [convert_numpy(i) for i in obj]
-    elif isinstance(obj, tuple):
-        return tuple(convert_numpy(i) for i in obj)
-    else:
-        return obj
+# Try to import OpenCV, fallback if not available
+try:
+    import cv2
+    HAS_CV2 = True
+except ImportError:
+    HAS_CV2 = False
+    print("⚠️  OpenCV not available, using PIL-based alternatives")
 
-class FixedProfessionalWardrobeAnalyzer:
-    """
-    FIXED Professional Wardrobe Analyzer with resolved display issues
-    """
+# Try to import sklearn
+try:
+    from sklearn.cluster import KMeans
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
+    print("⚠️  sklearn not available, using simple color extraction")
 
+class WardrobeAnalyzer:
     def __init__(self):
-        # Enhanced comprehensive color categorization system
+        """Initialize the wardrobe analyzer"""
+        # Color categories for wardrobe analysis
         self.color_categories = {
-            'red': [(220, 20, 60), (255, 0, 0), (178, 34, 34), (165, 42, 42), (139, 0, 0), (205, 92, 92)],
-            'pink': [(255, 192, 203), (255, 20, 147), (255, 105, 180), (219, 112, 147), (255, 182, 193)],
-            'blue': [(0, 0, 255), (30, 144, 255), (70, 130, 180), (100, 149, 237), (65, 105, 225), (0, 191, 255)],
-            'lightblue': [(173, 216, 230), (135, 206, 235), (176, 196, 222), (230, 230, 250), (135, 206, 250)],
-            'green': [(0, 128, 0), (34, 139, 34), (50, 205, 50), (46, 139, 87), (144, 238, 144), (0, 255, 127)],
-            'yellow': [(255, 255, 0), (255, 215, 0), (255, 255, 224), (240, 230, 140), (255, 250, 205)],
-            'orange': [(255, 165, 0), (255, 140, 0), (255, 127, 80), (255, 99, 71), (255, 69, 0)],
-            'purple': [(128, 0, 128), (147, 112, 219), (138, 43, 226), (186, 85, 211), (148, 0, 211)],
-            'brown': [(165, 42, 42), (139, 69, 19), (160, 82, 45), (205, 133, 63), (210, 180, 140)],
-            'black': [(0, 0, 0), (25, 25, 25), (64, 64, 64), (105, 105, 105), (47, 79, 79)],
-            'white': [(255, 255, 255), (248, 248, 255), (245, 245, 245), (250, 250, 250), (255, 250, 240)],
-            'gray': [(128, 128, 128), (169, 169, 169), (192, 192, 192), (211, 211, 211), (119, 136, 153)],
-            'navy': [(0, 0, 128), (25, 25, 112), (72, 61, 139), (47, 79, 79), (75, 0, 130)],
-            'beige': [(245, 245, 220), (255, 228, 196), (222, 184, 135), (210, 180, 140), (238, 203, 173)],
-            'maroon': [(128, 0, 0), (139, 0, 0), (165, 42, 42), (220, 20, 60), (176, 48, 96)]
+            'red': [(255, 0, 0), (220, 20, 60), (178, 34, 34), (255, 69, 0), (139, 0, 0),
+                   (205, 92, 92), (255, 99, 71), (255, 160, 122)],
+            'pink': [(255, 192, 203), (255, 20, 147), (255, 105, 180), (219, 112, 147),
+                    (255, 182, 193), (255, 218, 185)],
+            'blue': [(0, 0, 255), (0, 100, 255), (30, 144, 255), (70, 130, 180),
+                    (100, 149, 237), (65, 105, 225), (135, 206, 235)],
+            'lightblue': [(173, 216, 230), (135, 206, 235), (176, 196, 222), (230, 230, 250)],
+            'green': [(0, 255, 0), (34, 139, 34), (0, 128, 0), (50, 205, 50),
+                     (124, 252, 0), (46, 139, 87), (144, 238, 144)],
+            'yellow': [(255, 255, 0), (255, 215, 0), (255, 255, 224), (255, 250, 205),
+                      (240, 230, 140), (255, 228, 181)],
+            'orange': [(255, 165, 0), (255, 140, 0), (255, 99, 71), (255, 127, 80),
+                      (255, 160, 122), (255, 218, 185)],
+            'purple': [(128, 0, 128), (147, 112, 219), (138, 43, 226), (75, 0, 130),
+                      (186, 85, 211), (221, 160, 221)],
+            'brown': [(165, 42, 42), (139, 69, 19), (160, 82, 45), (205, 133, 63),
+                     (210, 180, 140), (222, 184, 135)],
+            'black': [(0, 0, 0), (25, 25, 25), (47, 79, 79), (36, 36, 36),
+                     (64, 64, 64), (105, 105, 105)],
+            'white': [(255, 255, 255), (248, 248, 255), (245, 245, 245), (250, 250, 250),
+                     (255, 250, 240), (240, 248, 255)],
+            'gray': [(128, 128, 128), (169, 169, 169), (105, 105, 105), (192, 192, 192),
+                    (211, 211, 211), (220, 220, 220)],
+            'navy': [(0, 0, 128), (25, 25, 112), (72, 61, 139), (60, 60, 120)],
+            'beige': [(245, 245, 220), (255, 228, 196), (222, 184, 135), (210, 180, 140)],
+            'cream': [(255, 253, 208), (255, 248, 220), (253, 245, 230)],
+            'maroon': [(128, 0, 0), (139, 0, 0), (165, 42, 42)]
         }
 
-        # Enhanced wardrobe color categories for diversity analysis
+        # Define display colors for pie chart (matching the category names)
+        self.display_colors = {
+            'red': '#FF0000',
+            'pink': '#FFC0CB', 
+            'blue': '#0000FF',
+            'lightblue': '#ADD8E6',
+            'green': '#008000',
+            'yellow': '#FFFF00',
+            'orange': '#FFA500',
+            'purple': '#800080',
+            'brown': '#A0522D',
+            'black': '#000000',
+            'white': '#FFFFFF',
+            'gray': '#808080',
+            'navy': '#000080',
+            'beige': '#F5F5DC',
+            'cream': '#FFFDD0',
+            'maroon': '#800000'
+        }
+
         self.essential_colors = ['black', 'white', 'navy', 'blue', 'gray', 'red', 'brown']
-        self.accent_colors = ['pink', 'green', 'yellow', 'orange', 'purple', 'lightblue']
+        self.accent_colors = ['pink', 'green', 'yellow', 'orange', 'purple']
 
-        # Analysis results storage
-        self.garment_detections = []
-        self.color_analysis = {}
-        self.diversity_metrics = {}
-        self.analysis_stats = {}
+        # Initialize tracking variables
+        self.garment_color_frequency = defaultdict(float)
+        self.detected_colors = set()
+        self.individual_garments = []
+        self.analysis_results = {}
+        self.original_image = None
 
-    def preprocess_image(self, image_path):
-        """Enhanced image preprocessing with advanced enhancement algorithms"""
+    def load_image(self, image_path):
+        """Load and preprocess image"""
         try:
             if isinstance(image_path, str):
-                pil_image = Image.open(image_path).convert('RGB')
-                print(f"✓ Image loaded: {pil_image.size}")
+                if not os.path.exists(image_path):
+                    raise FileNotFoundError(f"Image file not found: {image_path}")
+                self.original_image = Image.open(image_path)
             else:
-                pil_image = image_path.convert('RGB')
+                self.original_image = Image.open(image_path)
 
-            # Professional image enhancement pipeline
-            enhancer = ImageEnhance.Contrast(pil_image)
-            enhanced = enhancer.enhance(1.3)
-            enhancer = ImageEnhance.Sharpness(enhanced)
-            sharpened = enhancer.enhance(1.2)
-            enhancer = ImageEnhance.Color(sharpened)
-            color_enhanced = enhancer.enhance(1.1)
+            if self.original_image.mode != 'RGB':
+                self.original_image = self.original_image.convert('RGB')
 
-            return np.array(color_enhanced)
-        except Exception as e:
-            print(f"❌ Preprocessing error: {e}")
-            return None
+            # Resize if too large
+            max_size = 1000
+            if max(self.original_image.size) > max_size:
+                self.original_image.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
 
-    def advanced_garment_detection(self, image):
-        """Enhanced multi-region garment detection with improved accuracy"""
-        try:
-            height, width, _ = image.shape
-            print(f"🔍 Analyzing image: {width}x{height} pixels")
-
-            garment_regions = []
-
-            # Enhanced grid-based analysis
-            num_cols = 10
-            num_rows = 4
-
-            region_width = width // num_cols
-            region_height = height // num_rows
-
-            detected_regions = 0
-
-            for i in range(num_cols):
-                x = int(i * region_width * 0.8)
-                w = min(int(region_width * 1.4), width - x)
-
-                for j in range(num_rows):
-                    y = int(j * region_height * 0.7)
-                    h = min(int(region_height * 1.5), height - y)
-
-                    if x + w <= width and y + h <= height:
-                        region_roi = image[y:y+h, x:x+w]
-
-                        if self.has_significant_content(region_roi):
-                            refined_bbox = self.refine_bounding_box(image, (x, y, w, h))
-
-                            if refined_bbox:
-                                rx, ry, rw, rh = refined_bbox
-                                if rw > 35 and rh > 50:
-                                    confidence = self.calculate_region_confidence(region_roi)
-                                    if confidence > 0.6:
-                                        garment_regions.append({
-                                            'bbox': refined_bbox,
-                                            'area': rw * rh,
-                                            'confidence': confidence
-                                        })
-                                        detected_regions += 1
-
-            print(f"🎯 Initial regions detected: {detected_regions}")
-
-            garment_regions = self.remove_overlapping_regions(garment_regions)
-            garment_regions.sort(key=lambda x: (x['confidence'], x['area']), reverse=True)
-
-            final_regions = garment_regions[:20]
-            print(f"✅ Final garment regions: {len(final_regions)}")
-
-            return final_regions
+            print(f"✅ Image loaded successfully: {self.original_image.size}")
+            return True
 
         except Exception as e:
-            print(f"❌ Detection error: {e}")
-            return []
-
-    def has_significant_content(self, region):
-        """Enhanced content detection with multiple criteria"""
-        if region.size == 0:
+            print(f"❌ Error loading image: {e}")
             return False
 
-        flat_region = region.reshape(-1, 3)
-        color_std = np.std(flat_region, axis=0).mean()
+    def detect_garments(self):
+        """Detect garments in the wardrobe image"""
+        if not self.original_image:
+            return False
 
-        gray = np.mean(region, axis=2)
-        dx = np.gradient(gray, axis=1)
-        dy = np.gradient(gray, axis=0)
-        edges = np.sqrt(dx**2 + dy**2)
-        edge_content = np.sum(edges) / edges.size
+        image_array = np.array(self.original_image)
+        height, width = image_array.shape[:2]
 
-        texture_variance = np.var(gray)
+        print("🔍 Detecting garments...")
 
-        return (color_std > 12 or edge_content > 0.015 or texture_variance > 100)
+        # Create a grid to detect garments
+        cols = 15  # Number of potential garment columns
+        rows = 1   # Single row for hanging clothes
 
-    def calculate_region_confidence(self, region):
-        """Calculate confidence score for detected region"""
+        col_width = width // cols
+        garment_height = int(height * 0.8)  # 80% of image height
+        start_y = int(height * 0.1)  # Start 10% from top
+
+        garments_found = 0
+
+        for col in range(cols):
+            x = col * col_width
+
+            # Extract column region
+            if x + col_width < width:
+                region = image_array[start_y:start_y + garment_height, x:x + col_width]
+
+                if self._is_valid_garment_region(region):
+                    # Create garment data
+                    pixels = region.reshape(-1, 3)
+
+                    garment_data = {
+                        'id': garments_found,
+                        'bbox': (x, start_y, col_width, garment_height),
+                        'pixels': pixels,
+                        'area': len(pixels),
+                        'method': 'grid',
+                        'confidence': 0.8
+                    }
+
+                    self.individual_garments.append(garment_data)
+                    garments_found += 1
+
+        print(f"✅ Detected {len(self.individual_garments)} garments")
+        return len(self.individual_garments) > 0
+
+    def _is_valid_garment_region(self, region):
+        """Check if a region likely contains a garment"""
+        if region.size == 0 or len(region.shape) != 3:
+            return False
+
+        # Check color variance
+        std_r = np.std(region[:, :, 0])
+        std_g = np.std(region[:, :, 1])
+        std_b = np.std(region[:, :, 2])
+
+        avg_std = (std_r + std_g + std_b) / 3
+
+        # Should have some variation but not too much
+        return 8 < avg_std < 100
+
+    def extract_colors(self):
+        """Extract colors from detected garments"""
+        if not self.individual_garments:
+            print("❌ No garments detected")
+            return {}
+
+        all_colors = {}
+        print(f"🎨 Extracting colors from {len(self.individual_garments)} garments...")
+
+        for garment in self.individual_garments:
+            pixels = garment['pixels']
+
+            if len(pixels) < 50:
+                continue
+
+            # Sample pixels for faster processing
+            sample_size = min(1000, len(pixels))
+            sampled_pixels = pixels[np.random.choice(len(pixels), sample_size, replace=False)]
+
+            # Extract dominant colors
+            if HAS_SKLEARN:
+                colors = self._extract_colors_kmeans(sampled_pixels)
+            else:
+                colors = self._extract_colors_simple(sampled_pixels)
+
+            # Add to results
+            for i, color_data in enumerate(colors):
+                key = f"G{garment['id']}_C{i}"
+                all_colors[key] = color_data
+
+                # Update frequency tracking
+                category = color_data['category']
+                self.garment_color_frequency[category] += color_data['frequency']
+                self.detected_colors.add(category)
+
+        print(f"✅ Extracted {len(all_colors)} colors")
+        return all_colors
+
+    def _extract_colors_kmeans(self, pixels):
+        """Extract colors using KMeans clustering"""
         try:
-            gray = np.mean(region, axis=2)
+            # Use 3 clusters for dominant colors
+            kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
+            labels = kmeans.fit_predict(pixels)
+            centers = kmeans.cluster_centers_
 
-            edge_strength = np.std(np.gradient(gray))
-            color_diversity = np.std(region.reshape(-1, 3), axis=0).mean()
-            texture_score = np.var(gray)
-
-            confidence = (
-                min(edge_strength / 10, 1) * 0.3 +
-                min(color_diversity / 50, 1) * 0.4 +
-                min(texture_score / 1000, 1) * 0.3
-            )
-
-            return min(confidence, 1.0)
-        except:
-            return 0.5
-
-    def refine_bounding_box(self, image, bbox):
-        """Enhanced bounding box refinement"""
-        try:
-            x, y, w, h = bbox
-            roi = image[y:y+h, x:x+w]
-
-            gray_roi = np.mean(roi, axis=2)
-            mean_val = np.mean(gray_roi)
-            std_val = np.std(gray_roi)
-            threshold = mean_val - std_val * 0.5
-
-            content_mask = gray_roi < threshold
-
-            # Simple morphological operations
-            from scipy import ndimage
-            content_mask = ndimage.binary_closing(content_mask, structure=np.ones((3,3)))
-            content_mask = ndimage.binary_opening(content_mask, structure=np.ones((2,2)))
-
-            rows = np.any(content_mask, axis=1)
-            cols = np.any(content_mask, axis=0)
-
-            if not np.any(rows) or not np.any(cols):
-                return bbox
-
-            row_indices = np.where(rows)[0]
-            col_indices = np.where(cols)[0]
-
-            if len(row_indices) > 0 and len(col_indices) > 0:
-                rmin, rmax = row_indices[0], row_indices[-1]
-                cmin, cmax = col_indices[0], col_indices[-1]
-
-                padding = 5
-                rmin = max(0, rmin - padding)
-                rmax = min(h - 1, rmax + padding)
-                cmin = max(0, cmin - padding)
-                cmax = min(w - 1, cmax + padding)
-
-                new_x = x + cmin
-                new_y = y + rmin
-                new_w = cmax - cmin + 1
-                new_h = rmax - rmin + 1
-
-                return (new_x, new_y, new_w, new_h)
-
-        except:
-            pass
-
-        return bbox
-
-    def remove_overlapping_regions(self, regions):
-        """Enhanced overlap removal"""
-        if len(regions) <= 1:
-            return regions
-
-        regions.sort(key=lambda x: (x['confidence'], x['area']), reverse=True)
-
-        filtered_regions = []
-        for region in regions:
-            is_duplicate = False
-
-            for existing in filtered_regions:
-                overlap = self.calculate_overlap(region['bbox'], existing['bbox'])
-                if overlap > 0.4:
-                    is_duplicate = True
-                    break
-
-            if not is_duplicate:
-                filtered_regions.append(region)
-
-        return filtered_regions
-
-    def calculate_overlap(self, bbox1, bbox2):
-        """Enhanced IoU calculation"""
-        x1, y1, w1, h1 = bbox1
-        x2, y2, w2, h2 = bbox2
-
-        left = max(x1, x2)
-        top = max(y1, y2)
-        right = min(x1 + w1, x2 + w2)
-        bottom = min(y1 + h1, y2 + h2)
-
-        if left < right and top < bottom:
-            intersection = (right - left) * (bottom - top)
-            area1 = w1 * h1
-            area2 = w2 * h2
-            union = area1 + area2 - intersection
-            return intersection / union if union > 0 else 0
-
-        return 0
-
-    def extract_garment_colors(self, image, region_info):
-        """Enhanced color extraction with improved clustering"""
-        try:
-            x, y, w, h = region_info['bbox']
-
-            y1, y2 = max(0, y), min(image.shape[0], y + h)
-            x1, x2 = max(0, x), min(image.shape[1], x + w)
-
-            roi = image[y1:y2, x1:x2]
-
-            if roi.size == 0 or roi.shape[0] < 10 or roi.shape[1] < 10:
-                return None, []
-
-            pixels = roi.reshape(-1, 3)
-
-            pixel_brightness = np.mean(pixels, axis=1)
-            q1, q3 = np.percentile(pixel_brightness, [20, 80])
-            iqr = q3 - q1
-            lower_bound = q1 - 1.5 * iqr
-            upper_bound = q3 + 1.5 * iqr
-            mask = (pixel_brightness >= lower_bound) & (pixel_brightness <= upper_bound)
-            clean_pixels = pixels[mask] if np.any(mask) and np.sum(mask) > 50 else pixels
-
-            if len(clean_pixels) < 50:
-                return None, []
-
-            n_colors = min(6, max(3, len(clean_pixels) // 80))
-
-            # Use KMeans for better compatibility
-            kmeans = KMeans(n_clusters=n_colors, random_state=42, n_init=10)
-            kmeans.fit(clean_pixels)
-            colors = kmeans.cluster_centers_
-            labels = kmeans.labels_
-
-            color_info = []
+            # Calculate frequencies
+            unique_labels, counts = np.unique(labels, return_counts=True)
             total_pixels = len(labels)
 
-            for i, color in enumerate(colors):
-                count = np.sum(labels == i)
-                proportion = count / total_pixels
+            colors = []
+            for center, count in zip(centers, counts):
+                frequency = count / total_pixels
+                if frequency > 0.1:  # At least 10% of garment
+                    center = np.clip(center, 0, 255).astype(int)
+                    category = self.classify_color(center)
 
-                if proportion > 0.03:
-                    color_name = self.classify_color_enhanced(color)
-                    confidence = self.calculate_color_confidence(color, clean_pixels[labels == i])
-
-                    if confidence > 0.6:
-                        color_info.append({
-                            'rgb': tuple(np.clip(color.astype(int), 0, 255)),
-                            'proportion': proportion,
-                            'name': color_name,
-                            'confidence': confidence
+                    if category != 'unknown':
+                        colors.append({
+                            'rgb': tuple(center),
+                            'hex': self.rgb_to_hex(center),
+                            'category': category,
+                            'frequency': frequency
                         })
 
-            color_info.sort(key=lambda x: x['proportion'], reverse=True)
-
-            return roi, color_info[:4]
+            return colors
 
         except Exception as e:
-            print(f"⚠️  Color extraction error: {e}")
-            return None, []
+            print(f"⚠️ KMeans error: {e}")
+            return self._extract_colors_simple(pixels)
 
-    def classify_color_enhanced(self, rgb_color):
-        """Enhanced color classification with improved accuracy"""
-        r, g, b = np.clip(rgb_color, 0, 255)
+    def _extract_colors_simple(self, pixels):
+        """Simple color extraction without clustering"""
+        # Calculate mean color
+        mean_color = np.mean(pixels, axis=0).astype(int)
+        category = self.classify_color(mean_color)
 
-        h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
+        if category != 'unknown':
+            return [{
+                'rgb': tuple(mean_color),
+                'hex': self.rgb_to_hex(mean_color),
+                'category': category,
+                'frequency': 1.0
+            }]
+        return []
 
-        if s < 0.08 or v < 0.12:
-            if v < 0.2:
-                return 'black'
-            elif v > 0.88:
-                return 'white'
-            else:
-                return 'gray'
-
-        if 0.05 < s < 0.4 and 0.6 < v < 0.95:
-            if 0.08 < h < 0.17:
-                return 'beige'
-
+    def classify_color(self, rgb_color):
+        """Classify RGB color into categories"""
         min_distance = float('inf')
-        closest_color = 'gray'
+        closest_category = 'unknown'
 
-        for color_name, color_values in self.color_categories.items():
-            for color_rgb in color_values:
-                distance = np.sqrt(
-                    ((r - color_rgb[0]) * 0.3)**2 + 
-                    ((g - color_rgb[1]) * 0.59)**2 + 
-                    ((b - color_rgb[2]) * 0.11)**2
-                )
+        rgb_color = np.clip(rgb_color, 0, 255).astype(int)
+
+        for category, color_variants in self.color_categories.items():
+            for variant_rgb in color_variants:
+                distance = np.sqrt(np.sum((rgb_color - np.array(variant_rgb)) ** 2))
 
                 if distance < min_distance:
                     min_distance = distance
-                    closest_color = color_name
+                    closest_category = category
 
-        return closest_color
+        # Dynamic threshold
+        r, g, b = rgb_color
+        color_range = max(r, g, b) - min(r, g, b)
+        avg_brightness = np.mean([r, g, b])
 
-    def calculate_color_confidence(self, color, pixels):
-        """Calculate confidence score for color classification"""
-        try:
-            if len(pixels) == 0:
-                return 0.5
+        if color_range < 20:  # Neutral colors
+            threshold = 45 if avg_brightness < 40 or avg_brightness > 200 else 50
+        else:
+            threshold = 65
 
-            distances = [euclidean(color, pixel) for pixel in pixels[:100]]
-            consistency = 1.0 - (np.mean(distances) / 255.0)
+        return closest_category if min_distance < threshold else 'unknown'
 
-            h, s, v = colorsys.rgb_to_hsv(color[0]/255, color[1]/255, color[2]/255)
-            saturation_score = s
-            brightness_score = 1.0 - abs(v - 0.5) * 2
+    def analyze_wardrobe(self):
+        """Analyze wardrobe completeness"""
+        if not self.detected_colors:
+            return {
+                'current_colors': [],
+                'color_distribution': {},
+                'missing_essential': self.essential_colors,
+                'diversity_score': 0,
+                'garment_count': 0,
+                'recommendations': []
+            }
 
-            confidence = (consistency * 0.5 + saturation_score * 0.3 + brightness_score * 0.2)
+        # Color distribution
+        total_freq = sum(self.garment_color_frequency.values())
+        color_percentages = {}
+        if total_freq > 0:
+            color_percentages = {
+                color: (freq/total_freq)*100
+                for color, freq in self.garment_color_frequency.items()
+            }
 
-            return min(max(confidence, 0.1), 1.0)
-        except:
-            return 0.7
+        # Missing essential colors
+        missing_essential = [c for c in self.essential_colors if c not in self.detected_colors]
 
-    def calculate_diversity_score(self, color_counts):
-        """Enhanced Shannon entropy-based diversity calculation"""
-        if not color_counts or sum(color_counts.values()) == 0:
+        # Calculate diversity score
+        diversity_score = self._calculate_diversity_score()
+
+        # Generate recommendations
+        recommendations = []
+        if missing_essential:
+            recommendations.append({
+                'priority': 'HIGH',
+                'type': 'Essential Colors',
+                'colors': missing_essential[:3],
+                'reason': 'Foundation colors for wardrobe versatility'
+            })
+
+        results = {
+            'current_colors': sorted(list(self.detected_colors)),
+            'color_distribution': color_percentages,
+            'missing_essential': missing_essential,
+            'diversity_score': diversity_score,
+            'garment_count': len(self.individual_garments),
+            'recommendations': recommendations
+        }
+
+        self.analysis_results = results
+        return results
+
+    def _calculate_diversity_score(self):
+        """Calculate diversity score"""
+        if not self.detected_colors:
             return 0
 
-        total = sum(color_counts.values())
-        shannon_index = 0
+        # Variety score (50 points)
+        variety_score = (len(self.detected_colors) / len(self.color_categories)) * 50
 
-        for count in color_counts.values():
-            if count > 0:
-                proportion = count / total
-                shannon_index -= proportion * np.log(proportion)
+        # Essential coverage (30 points)
+        essential_present = len([c for c in self.essential_colors if c in self.detected_colors])
+        essential_score = (essential_present / len(self.essential_colors)) * 30
 
-        max_possible = np.log(len(self.color_categories))
-        base_score = (shannon_index / max_possible) * 100 if max_possible > 0 else 0
+        # Garment count (20 points)
+        garment_score = min(20, len(self.individual_garments) * 2)
 
-        variety_bonus = min(len(color_counts) * 2, 10)
-        diversity_score = min(100, base_score + variety_bonus)
+        return min(100, variety_score + essential_score + garment_score)
 
-        return diversity_score
+    def rgb_to_hex(self, rgb):
+        """Convert RGB to hex"""
+        rgb = np.clip(rgb, 0, 255).astype(int)
+        return "#{:02x}{:02x}{:02x}".format(rgb[0], rgb[1], rgb[2])
 
-    def analyze_wardrobe(self, image_path):
-        """Enhanced complete wardrobe analysis pipeline"""
-        print("🚀 Starting FIXED Professional Wardrobe Analysis...")
-        print("=" * 60)
+    def generate_report(self):
+        """Generate analysis report"""
+        if not self.analysis_results:
+            print("❌ No analysis results available")
+            return
 
-        image = self.preprocess_image(image_path)
-        if image is None:
-            print("❌ Failed to load image")
-            return False
+        print("\n" + "="*60)
+        print(" "*20 + "🎨 WARDROBE ANALYSIS 🎨")
+        print("="*60)
+        print(f"📅 Analysis Date: {datetime.now().strftime('%B %d, %Y')}")
+        print(f"👔 Garments Analyzed: {len(self.individual_garments)}")
+        print("-"*60)
 
-        print("\n🔎 Phase 1: Advanced Garment Detection...")
-        garment_regions = self.advanced_garment_detection(image)
-
-        if not garment_regions:
-            print("❌ No garments detected")
-            return False
-
-        print("\n🎨 Phase 2: Color Analysis & Classification...")
-        color_frequency = defaultdict(float)
-        garment_details = []
-        successful_analyses = 0
-
-        for i, region in enumerate(garment_regions):
-            print(f"   Analyzing garment {i+1}/{len(garment_regions)}...", end=" ")
-
-            roi, colors = self.extract_garment_colors(image, region)
-
-            if colors:
-                garment_id = f"G{i+1}"
-
-                garment_info = {
-                    'id': garment_id,
-                    'bbox': region['bbox'],
-                    'colors': colors,
-                    'primary_color': colors[0]['name'] if colors else 'unknown',
-                    'confidence': region['confidence'],
-                    'color_count': len(colors)
-                }
-
-                garment_details.append(garment_info)
-                successful_analyses += 1
-
-                for color_data in colors:
-                    weight = color_data['proportion'] * color_data.get('confidence', 1.0)
-                    color_frequency[color_data['name']] += weight
-
-                print("✓")
-            else:
-                print("⚠️")
-
-        print(f"\n📊 Phase 3: Calculating Diversity Metrics...")
-
-        diversity_score = self.calculate_diversity_score(color_frequency)
-
-        essential_present = sum(1 for color in self.essential_colors if color in color_frequency)
-        essential_coverage = (essential_present / len(self.essential_colors)) * 100
-
-        accent_present = sum(1 for color in self.accent_colors if color in color_frequency)
-        accent_coverage = (accent_present / len(self.accent_colors)) * 100
-
-        color_balance = min(essential_coverage, accent_coverage)
-        health_score = (diversity_score * 0.4 + essential_coverage * 0.3 + accent_coverage * 0.3)
-
-        self.garment_detections = garment_details
-        self.color_analysis = dict(color_frequency)
-        self.diversity_metrics = {
-            'diversity_score': diversity_score,
-            'total_garments': len(garment_details),
-            'unique_colors': len(color_frequency),
-            'essential_coverage': essential_coverage,
-            'accent_coverage': accent_coverage,
-            'color_balance': color_balance,
-            'health_score': health_score,
-            'successful_analyses': successful_analyses,
-            'detection_rate': (successful_analyses / len(garment_regions)) * 100
-        }
-
-        self.analysis_stats = {
-            'image_dimensions': f"{image.shape[1]}x{image.shape[0]}",
-            'total_regions_detected': len(garment_regions),
-            'successful_color_analyses': successful_analyses,
-            'average_colors_per_garment': np.mean([len(g['colors']) for g in garment_details]),
-            'most_common_color': max(color_frequency.keys(), key=color_frequency.get) if color_frequency else 'None'
-        }
-
-        print("\n" + "=" * 60)
-        print("✅ ANALYSIS COMPLETED SUCCESSFULLY!")
-        print(f"📊 Diversity Score: {diversity_score:.1f}/100")
-        print(f"🏥 Health Score: {health_score:.1f}/100")
-        print(f"👔 Garments Analyzed: {successful_analyses}/{len(garment_regions)}")
-        print(f"🎨 Unique Colors: {len(color_frequency)}")
-        print(f"⚡ Essential Coverage: {essential_coverage:.1f}%")
-        print(f"✨ Accent Coverage: {accent_coverage:.1f}%")
-
-        return True
-
-    def create_fixed_visualization(self, image_path, save_path="fixed_professional_analysis.png"):
-        """Create FIXED visualization that displays properly"""
-        if not self.garment_detections:
-            print("❌ No analysis data available for visualization")
-            return None
-
-        image = self.preprocess_image(image_path)
-        if image is None:
-            return None
-
-        print("🎨 Creating FIXED professional visualization...")
-
-        # Create figure with FIXED settings
-        plt.rcParams.update({
-            'figure.max_open_warning': 0,
-            'axes.formatter.use_mathtext': True,
-            'font.size': 10
-        })
-
-        fig = plt.figure(figsize=(18, 11), facecolor='white', dpi=100)
-        gs = GridSpec(3, 4, height_ratios=[2.5, 1, 1], width_ratios=[2, 1, 1, 1], 
-                      hspace=0.25, wspace=0.25)
-
-        # Main image with bounding boxes
-        ax1 = fig.add_subplot(gs[0, 0:2])
-        ax1.imshow(image)
-
-        colors_for_boxes = plt.cm.tab20(np.linspace(0, 1, len(self.garment_detections)))
-
-        for i, garment in enumerate(self.garment_detections):
-            x, y, w, h = garment['bbox']
-
-            confidence = garment.get('confidence', 0.8)
-            line_width = 2 + confidence * 3
-
-            rect = patches.Rectangle(
-                (x, y), w, h, 
-                linewidth=line_width, 
-                edgecolor=colors_for_boxes[i], 
-                facecolor='none',
-                alpha=0.8
-            )
-            ax1.add_patch(rect)
-
-            color_count = garment.get('color_count', 1)
-            label_text = f"{garment['id']}\n{garment['primary_color'].title()}\n({color_count} colors)"
-
-            label_y = max(0, y-15)
-            ax1.text(
-                x+3, label_y, 
-                label_text,
-                fontsize=9, 
-                fontweight='bold',
-                bbox=dict(boxstyle="round,pad=0.3", 
-                         facecolor=colors_for_boxes[i], 
-                         alpha=0.9,
-                         edgecolor='white',
-                         linewidth=1),
-                verticalalignment='bottom',
-                color='white'
-            )
-
-        ax1.set_title("🔍 Individual Garment Detection", 
-                     fontsize=14, fontweight='bold', pad=15)
-        ax1.axis('off')
-
-        # Color distribution pie chart
-        ax2 = fig.add_subplot(gs[0, 2])
-        if self.color_analysis:
-            colors_list = list(self.color_analysis.keys())
-            sizes = list(self.color_analysis.values())
-
-            color_map = {
-                'red': '#DC143C', 'pink': '#FF1493', 'blue': '#4169E1',
-                'green': '#32CD32', 'yellow': '#FFD700', 'orange': '#FF8C00',
-                'purple': '#9370DB', 'brown': '#8B4513', 'black': '#2F2F2F',
-                'white': '#F8F8FF', 'gray': '#708090', 'navy': '#191970',
-                'beige': '#F5E6D3', 'maroon': '#800000', 'lightblue': '#87CEEB'
-            }
-
-            pie_colors = [color_map.get(color, '#CCCCCC') for color in colors_list]
-
-            wedges, texts, autotexts = ax2.pie(
-                sizes, 
-                labels=colors_list, 
-                colors=pie_colors,
-                autopct='%1.1f%%',
-                startangle=90,
-                textprops={'fontsize': 8, 'fontweight': 'bold'}
-            )
-
-            for autotext in autotexts:
-                autotext.set_color('white')
-                autotext.set_fontweight('bold')
-
-        ax2.set_title("🎨 Color Distribution", fontsize=12, fontweight='bold', pad=10)
-
-        # Metrics panel
-        ax3 = fig.add_subplot(gs[0, 3])
-        ax3.axis('off')
-
-        diversity_score = self.diversity_metrics['diversity_score']
-        health_score = self.diversity_metrics['health_score']
-
-        metrics_text = f"""📊 ANALYSIS SUMMARY
-
-🎯 Diversity: {diversity_score:.1f}/100
-🏥 Health: {health_score:.1f}/100
-👔 Garments: {self.diversity_metrics['total_garments']}
-🎨 Colors: {self.diversity_metrics['unique_colors']}
-⚡ Essential: {self.diversity_metrics['essential_coverage']:.0f}%
-✨ Accent: {self.diversity_metrics['accent_coverage']:.0f}%
-⚖️ Balance: {self.diversity_metrics['color_balance']:.0f}%
-"""
-
-        if health_score >= 80:
-            rec_text = "🏆 OUTSTANDING!\n\nExceptional diversity\nand balance achieved.\nProfessional quality!"
-            rec_color = '#90EE90'
-        elif health_score >= 65:
-            rec_text = "🌟 EXCELLENT!\n\nGreat foundation.\nMinor improvements\npossible."
-            rec_color = '#87CEEB'
-        elif health_score >= 50:
-            rec_text = "✅ GOOD BASE\n\nSolid foundation.\nAdd more accent\ncolors for variety."
-            rec_color = '#F0E68C'
+        # Diversity score
+        score = self.analysis_results['diversity_score']
+        if score >= 80:
+            status = "EXCELLENT"
+        elif score >= 60:
+            status = "GOOD"
+        elif score >= 40:
+            status = "FAIR"
         else:
-            rec_text = "📈 IMPROVE\n\nSignificant growth\nopportunity available.\nFocus on essentials."
-            rec_color = '#FFA07A'
+            status = "NEEDS IMPROVEMENT"
 
-        ax3.text(0.05, 0.95, metrics_text, transform=ax3.transAxes, fontsize=9,
-                verticalalignment='top', fontfamily='monospace',
-                bbox=dict(boxstyle="round,pad=0.4", facecolor='lightblue', alpha=0.8))
+        print(f"\n🏆 DIVERSITY SCORE: {score:.1f}/100 ({status})")
 
-        ax3.text(0.05, 0.42, rec_text, transform=ax3.transAxes, fontsize=9,
-                verticalalignment='top', fontweight='bold',
-                bbox=dict(boxstyle="round,pad=0.4", facecolor=rec_color, alpha=0.9))
+        # Colors detected
+        colors = self.analysis_results['current_colors']
+        print(f"\n🎨 DETECTED COLORS ({len(colors)}):")
+        for color in colors:
+            print(f"  ✓ {color.title()}")
 
-        # Coverage analysis bar chart
-        ax4 = fig.add_subplot(gs[1, :])
+        # Color distribution
+        dist = self.analysis_results['color_distribution']
+        if dist:
+            print(f"\n📊 COLOR DISTRIBUTION:")
+            for color, pct in sorted(dist.items(), key=lambda x: x[1], reverse=True):
+                print(f"  {color.title():<12} {pct:5.1f}%")
 
-        categories = ['Essential\nColors', 'Accent\nColors', 'All\nColors', 'Health\nScore']
-        percentages = [
-            self.diversity_metrics['essential_coverage'],
-            self.diversity_metrics['accent_coverage'], 
-            (self.diversity_metrics['unique_colors'] / len(self.color_categories)) * 100,
-            self.diversity_metrics['health_score']
-        ]
+        # Missing essentials
+        missing = self.analysis_results['missing_essential']
+        if missing:
+            print(f"\n❌ MISSING ESSENTIALS:")
+            for color in missing:
+                print(f"  • {color.title()}")
+        else:
+            print(f"\n✅ ALL ESSENTIAL COLORS PRESENT!")
 
-        bar_colors = ['#FF6B6B', '#FFD93D', '#6BCF7F', '#4ECDC4']
+        print("\n" + "="*60)
 
-        bars = ax4.bar(categories, percentages, 
-                      color=bar_colors,
-                      alpha=0.8, 
-                      edgecolor='black', 
-                      linewidth=1)
+    def create_visualization(self):
+        """Create visualization of the analysis with MATCHING COLORS in pie chart"""
+        if not self.individual_garments:
+            return
 
-        for bar, pct in zip(bars, percentages):
-            height = bar.get_height()
-            ax4.text(bar.get_x() + bar.get_width()/2., height + 1,
-                    f'{pct:.1f}%', ha='center', va='bottom', 
-                    fontweight='bold', fontsize=11)
-
-        ax4.set_ylabel('Score / Coverage (%)', fontweight='bold', fontsize=11)
-        ax4.set_title('📊 Coverage & Performance Analysis', 
-                     fontsize=13, fontweight='bold', pad=15)
-        ax4.set_ylim(0, 105)
-        ax4.grid(True, alpha=0.3, linestyle='--')
-        ax4.set_axisbelow(True)
-
-        # Technical details
-        ax5 = fig.add_subplot(gs[2, :])
-        ax5.axis('off')
-
-        tech_details = f"""🔬 TECHNICAL DETAILS: Image: {self.analysis_stats['image_dimensions']} | Regions: {self.analysis_stats['total_regions_detected']} | Success: {self.analysis_stats['successful_color_analyses']} | Avg Colors: {self.analysis_stats['average_colors_per_garment']:.1f} | Top Color: {self.analysis_stats['most_common_color'].title()}
-
-🛠️  METHODS: Multi-region detection • RGB-HSV classification • Shannon entropy diversity • K-means clustering • Confidence scoring"""
-
-        ax5.text(0.02, 0.8, tech_details, transform=ax5.transAxes, fontsize=9,
-                verticalalignment='top', fontfamily='monospace',
-                bbox=dict(boxstyle="round,pad=0.4", facecolor='#F0F8FF', alpha=0.8))
-
-        # Title and timestamp
-        fig.suptitle('🎨 Professional Wardrobe Color Analysis Report (FIXED v2.1) 🎨', 
-                    fontsize=16, fontweight='bold', y=0.96)
-
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-        fig.text(0.02, 0.01, f"Generated: {timestamp} | Patent-Quality Analysis | Fixed Display Version", 
-                fontsize=8, alpha=0.7)
-
-        plt.tight_layout()
-
-        # FIXED save method - remove the problematic 'quality' parameter
         try:
-            plt.savefig(save_path, dpi=300, bbox_inches='tight', 
-                       facecolor='white', edgecolor='none')
-            print(f"✅ Visualization saved: {save_path}")
+            import matplotlib.pyplot as plt
+
+            fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
+            fig.suptitle('Wardrobe Color Analysis Results', fontsize=16, fontweight='bold')
+
+            # 1. Original image with garment regions
+            image_array = np.array(self.original_image)
+            ax1.imshow(image_array)
+
+            # Draw rectangles for garments
+            for i, garment in enumerate(self.individual_garments):
+                x, y, w, h = garment['bbox']
+                rect = plt.Rectangle((x, y), w, h, linewidth=2, edgecolor='red', facecolor='none')
+                ax1.add_patch(rect)
+                ax1.text(x + w//2, y + h//2, f'Item {i+1}', ha='center', va='center',
+                        bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+
+            ax1.set_title(f'Detected Garments ({len(self.individual_garments)})')
+            ax1.axis('off')
+
+            # 2. Color distribution pie chart with MATCHING COLORS
+            if self.analysis_results.get('color_distribution'):
+                colors = list(self.analysis_results['color_distribution'].keys())
+                sizes = list(self.analysis_results['color_distribution'].values())
+
+                # Create matching colors for pie chart
+                pie_colors = []
+                for color_name in colors:
+                    if color_name in self.display_colors:
+                        # Use predefined display color
+                        pie_colors.append(self.display_colors[color_name])
+                    else:
+                        # Fallback to a default color
+                        pie_colors.append('#CCCCCC')  # Light gray fallback
+
+                # Handle white color visibility issue
+                pie_colors_fixed = []
+                for i, color in enumerate(pie_colors):
+                    if color == '#FFFFFF':  # White
+                        pie_colors_fixed.append('#F0F0F0')  # Light gray instead of pure white
+                    elif color == '#000000':  # Black
+                        pie_colors_fixed.append('#333333')  # Dark gray instead of pure black
+                    else:
+                        pie_colors_fixed.append(color)
+
+                wedges, texts, autotexts = ax2.pie(sizes, labels=colors, autopct='%1.1f%%', 
+                                                  startangle=90, colors=pie_colors_fixed)
+
+                # Make percentage text more readable
+                for autotext in autotexts:
+                    autotext.set_color('black')
+                    autotext.set_fontweight('bold')
+                    autotext.set_fontsize(9)
+
+                # Add border to white/light wedges for visibility
+                for i, (wedge, color) in enumerate(zip(wedges, pie_colors_fixed)):
+                    if color in ['#F0F0F0', '#FFFDD0', '#F5F5DC']:  # Light colors
+                        wedge.set_edgecolor('black')
+                        wedge.set_linewidth(1.5)
+
+                ax2.set_title('Color Distribution (Colors Match Detected Colors!)')
+            else:
+                ax2.text(0.5, 0.5, 'No color data', ha='center', va='center')
+                ax2.set_title('Color Distribution')
+
+            # 3. Metrics bar chart
+            metrics = ['Diversity\nScore', 'Garments', 'Colors']
+            values = [self.analysis_results['diversity_score'], 
+                     len(self.individual_garments),
+                     len(self.detected_colors)]
+
+            bars = ax3.bar(metrics, values, color=['#3498db', '#2ecc71', '#e74c3c'])
+            ax3.set_title('Analysis Metrics')
+
+            # Add values on bars
+            for bar, value in zip(bars, values):
+                height = bar.get_height()
+                ax3.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
+                        f'{value:.1f}' if isinstance(value, float) else str(value),
+                        ha='center', va='bottom', fontweight='bold')
+
+            # 4. Summary with color legend
+            ax4.axis('off')
+            summary_text = "ANALYSIS SUMMARY:\n\n"
+            summary_text += f"• {len(self.individual_garments)} garments detected\n"
+            summary_text += f"• {len(self.detected_colors)} colors identified\n"
+            summary_text += f"• Diversity score: {self.analysis_results['diversity_score']:.1f}/100\n\n"
+
+            # Add detected colors with their actual colors
+            if self.detected_colors:
+                summary_text += "Detected Colors:\n"
+                for color in sorted(self.detected_colors):
+                    summary_text += f"• {color.title()}\n"
+                summary_text += "\n"
+
+            missing = self.analysis_results.get('missing_essential', [])
+            if missing:
+                summary_text += f"Missing essentials:\n"
+                for color in missing[:3]:
+                    summary_text += f"• {color.title()}\n"
+            else:
+                summary_text += "Excellent color diversity!\nWell-balanced wardrobe."
+
+            ax4.text(0.05, 0.95, summary_text, transform=ax4.transAxes, fontsize=10,
+                    verticalalignment='top', bbox=dict(boxstyle="round,pad=0.5", 
+                    facecolor="lightblue", alpha=0.3))
+            ax4.set_title('Summary & Color Legend')
+
+            plt.tight_layout()
+            plt.savefig('wardrobe_analysis.png', dpi=150, bbox_inches='tight')
+            plt.show()
+            print("✅ Visualization saved as 'wardrobe_analysis.png'")
+            print("🎨 Pie chart colors now match the actual detected colors!")
+
         except Exception as e:
-            print(f"⚠️  Save warning: {e}")
-            # Fallback save
-            plt.savefig(save_path, bbox_inches='tight', facecolor='white')
-            print(f"✅ Visualization saved with fallback method: {save_path}")
+            print(f"⚠️ Visualization error: {e}")
 
-        # FIXED display method that keeps window open
-        print("🖼️  Displaying visualization...")
-        plt.show(block=False)  # Non-blocking show
 
-        # Keep the window open
-        print("\n" + "="*50)
-        print("🎯 VISUALIZATION DISPLAYED!")
-        print("👀 The analysis window should now be visible")
-        print("🔄 Close the window manually when you're done viewing")
-        print("⏳ Press Enter here to continue or close the window...")
-        print("="*50)
-
-        # Wait for user input to keep program running
-        try:
-            input()  # Wait for user to press Enter
-        except:
-            time.sleep(30)  # Fallback: wait 30 seconds
-
-        return fig
-
-def main():
-    """FIXED main execution function"""
-    print("🌟 FIXED PROFESSIONAL WARDROBE ANALYZER v2.1 🌟")
-    print("Patent-Quality Implementation with FIXED Display")
-    print("="*70)
-
-    # Initialize analyzer
-    analyzer = FixedProfessionalWardrobeAnalyzer()
-
-    # IMPORTANT: UPDATE THIS PATH TO YOUR IMAGE
-    image_path = r"C:\Users\nadai\Downloads\wardrob_3pic.jpg"
+def analyze_wardrobe(image_path, visualize=True):
+    """
+    Main function to analyze wardrobe colors and diversity
+    """
+    print("🚀 Starting Wardrobe Analysis...")
+    print("="*50)
 
     try:
-        print("\n🚀 Starting comprehensive analysis...")
+        analyzer = WardrobeAnalyzer()
 
-        if analyzer.analyze_wardrobe(image_path):
-            print("\n🎨 Creating FIXED visualization...")
+        # Load image
+        print("\n📸 Loading Image...")
+        if not analyzer.load_image(image_path):
+            return None
 
-            fig = analyzer.create_fixed_visualization(
-                image_path, 
-                "fixed_professional_analysis.png"
-            )
+        # Detect garments
+        print("\n🔍 Detecting Garments...") 
+        if not analyzer.detect_garments():
+            print("❌ No garments detected")
+            return None
 
-            print("\n📋 Generating report...")
+        # Extract colors
+        print("\n🎨 Extracting Colors...")
+        colors = analyzer.extract_colors()
+        if not colors:
+            print("❌ No colors extracted")
+            return None
 
-            # Generate basic report data
-            report_data = {
-                'timestamp': datetime.now().isoformat(),
-                'diversity_score': analyzer.diversity_metrics['diversity_score'],
-                'health_score': analyzer.diversity_metrics['health_score'],
-                'total_garments': analyzer.diversity_metrics['total_garments'],
-                'unique_colors': analyzer.diversity_metrics['unique_colors'],
-                'color_distribution': dict(analyzer.color_analysis),
-                'garments': [
-                    {
-                        'id': g['id'],
-                        'primary_color': g['primary_color'],
-                        'bbox': g['bbox'],
-                        'colors': [c['name'] for c in g['colors']]
-                    }
-                    for g in analyzer.garment_detections
-                ]
-            }
+        # Analyze wardrobe
+        print("\n📊 Analyzing Wardrobe...")
+        results = analyzer.analyze_wardrobe()
 
-            with open('fixed_analysis_report.json', 'w') as f:
-                json.dump(convert_numpy(report_data), f, indent=2)
-            print("✅ Report saved: fixed_analysis_report.json")
+        # Generate report
+        print("\n📋 Generating Report...")
+        analyzer.generate_report()
 
-            print("\n" + "="*70)
-            print("🎊 FIXED ANALYSIS COMPLETED SUCCESSFULLY!")
-            print("\n📁 Files Generated:")
-            print("   1. 🖼️  fixed_professional_analysis.png")
-            print("   2. 📄 fixed_analysis_report.json")
-            print("\n🏆 Ready for professor presentation!")
-            print("✨ Visualization should be displayed and stay open!")
+        # Create visualization
+        if visualize:
+            print("\n📈 Creating Visualization...")
+            analyzer.create_visualization()
 
-        else:
-            print("❌ Analysis failed. Please check the image file path.")
+        print("\n🎉 ANALYSIS COMPLETE!")
+        return analyzer
 
     except Exception as e:
         print(f"❌ Error: {e}")
-        print("\nTROUBLESHOoting:")
-        print("1. Check if the image path is correct")
-        print("2. Ensure the image file exists")
-        print("3. Try with a different image format")
+        import traceback
+        traceback.print_exc()
+        return None
 
 if __name__ == "__main__":
-    main()
+    print("🌟 WARDROBE COLOR ANALYZER 🌟")
+    print("Analyze your wardrobe colors and diversity!")
+    analyzer = analyze_wardrobe("idealwardrobeimage.jpg")
