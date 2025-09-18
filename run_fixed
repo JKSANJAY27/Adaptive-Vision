@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""
+Wardrobe Color Analysis Tool
+Analyze your wardrobe colors with accurate color visualization
+"""
+
+from WARDROBE_ANALYZER_FIXED import analyze_wardrobe
+
+print("🎨 WARDROBE COLOR ANALYZER")
+print("=" * 30)
+
+print("\nAnalyzing your wardrobe image...")
+print("🎯 Pie chart colors will match detected colors!")
+
+# Run the analysis
+analyzer = analyze_wardrobe(
+    image_path=r"C:\Users\nadai\Downloads\idealwardrobeimage.png",
+    visualize=True
+)
+
+if analyzer:
+    print("\n" + "✅" * 20)
+    print("ANALYSIS COMPLETED SUCCESSFULLY!")
+    print("✅" * 20)
+
+    # Display key results
+    results = analyzer.analysis_results
+
+    print("\n📊 KEY RESULTS:")
+    print("-" * 25)
+    print(f"👔 Garments Detected: {results['garment_count']}")
+    print(f"🎨 Colors Found: {len(results['current_colors'])}")
+    print(f"🏆 Diversity Score: {results['diversity_score']:.1f}/100")
+
+    print("\n🌈 Your Wardrobe Colors:")
+    for i, color in enumerate(results['current_colors'], 1):
+        print(f"  {i:2d}. {color.title()}")
+
+    if results['color_distribution']:
+        print("\n📈 Color Distribution:")
+        sorted_colors = sorted(results['color_distribution'].items(), 
+                             key=lambda x: x[1], reverse=True)
+        for color, pct in sorted_colors[:5]:
+            print(f"  • {color.title()}: {pct:.1f}%")
+
+    missing = results.get('missing_essential', [])
+    if missing:
+        print(f"\n⚠️  Missing Essential Colors:")
+        for color in missing:
+            print(f"  • {color.title()}")
+    else:
+        print("\n✨ Great! All essential colors present!")
+
+    print("\n📊 Check 'wardrobe_analysis.png' for detailed visualization")
+    print("🎨 The pie chart now shows actual colors that match your wardrobe!")
+
+else:
+    print("\n❌ Analysis failed. Check error messages above.")
+
+print("\n🎨 Analysis Complete!")
